@@ -124,8 +124,8 @@ if df is not None:
         st.markdown("---")
         st.subheader("📋 Matriz de Decisão Dinâmica")
         
-        # Constrói uma nova tabela apenas com as colunas dos materiais que o utilizador escolheu
-        colunas_para_mostrar = [df.columns[0], df.columns[1]] # Colunas 'Criterio' e 'Peso'
+        # Constrói a tabela apenas com as colunas escolhidas
+        colunas_para_mostrar = [df.columns[0], df.columns[1]] 
         nomes_tabela = ['Critério', 'Peso']
         
         for mat in selecionados:
@@ -138,5 +138,9 @@ if df is not None:
         df_limpo = df[colunas_para_mostrar].copy()
         df_limpo.columns = nomes_tabela
         
-        # Mostra o DataFrame bonitão no Streamlit
-        st.dataframe(df_limpo, use_container_width=True, hide_index=True)
+        # 💡 O GRANDE TRUQUE: Transformar 'Critério' e 'Peso' no Índice da tabela.
+        # Isso faz o Streamlit fixá-las automaticamente ao fazer scroll para a direita!
+        df_fixo = df_limpo.set_index(['Critério', 'Peso'])
+        
+        # Mostra a tabela interativa com as colunas congeladas
+        st.dataframe(df_fixo, use_container_width=True)
