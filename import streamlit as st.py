@@ -13,15 +13,17 @@ st.markdown("Selecione os materiais no menu lateral esquerdo para comparar os cr
 # O cache faz com que o Streamlit não tenha de ler o Excel sempre que clicas num botão
 @st.cache_data
 def carregar_dados():
-    # ATENÇÃO: Confirma se este é o teu caminho correto!
-    caminho_arquivo = r'C:\Users\macra\OneDrive\Desktop\Real Case\Matriz de Decisão Chassi- Prototipo_VFINAL.xlsx'
+    # Modo Nuvem: Lê apenas o nome do ficheiro que está junto dele no GitHub
     try:
-        # Pula as 14 primeiras linhas chatas e lê apenas as 7 linhas úteis da matriz
-        df = pd.read_excel(caminho_arquivo, sheet_name='Decision Matrix', skiprows=14, nrows=7)
-        return df
-    except Exception as e:
-        st.error(f"Erro ao ler o ficheiro Excel. Verifique o caminho. Detalhe: {e}")
-        return None
+        # Tenta primeiro a versão SEM til (como estava na sua pasta original)
+        return pd.read_excel('Matriz de Decisao Chassi- Prototipo_VFINAL.xlsx', sheet_name='Decision Matrix', skiprows=14, nrows=7)
+    except:
+        try:
+            # Tenta a versão COM til (caso o nome no GitHub esteja assim)
+            return pd.read_excel('Matriz de Decisão Chassi- Prototipo_VFINAL.xlsx', sheet_name='Decision Matrix', skiprows=14, nrows=7)
+        except Exception as e:
+            st.error("Erro: O ficheiro Excel não foi encontrado junto ao script no GitHub. Confirme se o nome está idêntico.")
+            return None
 
 df = carregar_dados()
 
