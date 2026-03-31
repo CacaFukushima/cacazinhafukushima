@@ -7,29 +7,27 @@ import plotly.express as px
 st.set_page_config(page_title="Dashboard Chassi", layout="wide")
 
 st.title("🏎️ Matriz de Decisão: Protótipo do Chassi")
-st.markdown("Selecione os materiais no menu lateral esquerdo para comparar os critérios de desempenho em tempo real.")
+st.markdown("Selecione os materiais e ajuste os **pesos** no menu lateral para ver os resultados em tempo real.")
 
 # --- 2. LEITURA DE DADOS (CACHE) ---
-# O cache faz com que o Streamlit não tenha de ler o Excel sempre que clicas num botão
 @st.cache_data
 def carregar_dados():
-    # Modo Nuvem: Lê apenas o nome do ficheiro que está junto dele no GitHub
+    # Modo Nuvem: Lê apenas o nome do ficheiro que está junto dele
     try:
-        # Tenta primeiro a versão SEM til (como estava na sua pasta original)
-        return pd.read_excel('Matriz de Decisao Chassi- Prototipo_VFINAL.xlsx', sheet_name='Decision Matrix', skiprows=14, nrows=7)
+        # ATENÇÃO: Mudamos nrows para 6. Já não precisamos da linha do "Total" do Excel, 
+        # porque o nosso código agora vai calcular o total matematicamente!
+        return pd.read_excel('Matriz de Decisao Chassi- Prototipo_VFINAL.xlsx', sheet_name='Decision Matrix', skiprows=14, nrows=6)
     except:
         try:
-            # Tenta a versão COM til (caso o nome no GitHub esteja assim)
-            return pd.read_excel('Matriz de Decisão Chassi- Prototipo_VFINAL.xlsx', sheet_name='Decision Matrix', skiprows=14, nrows=7)
+            return pd.read_excel('Matriz de Decisão Chassi- Prototipo_VFINAL.xlsx', sheet_name='Decision Matrix', skiprows=14, nrows=6)
         except Exception as e:
-            st.error("Erro: O ficheiro Excel não foi encontrado junto ao script no GitHub. Confirme se o nome está idêntico.")
+            st.error("Erro: O ficheiro Excel não foi encontrado junto ao script. Confirme se o nome está idêntico.")
             return None
 
 df = carregar_dados()
 
 if df is not None:
-    # --- 3.MAPEAMENTO INTELIGENTE DE COLUNAS ---
-    # Sabendo que as notas começam na coluna 4 e saltam de 2 em 2 (Nota e Nota Ponderada)
+    # --- 3. MAPEAMENTO INTELIGENTE DE COLUNAS ---
     nomes_materiais = [
         'Fibra de Carbono', 'Fibra de Vidro', 'Aramida', 'Alumínio CHASSI', 
         'Aço 1020', 'Aço 4340', 'Aço 4130', 'Aço 1010', 'Titânio', 'Alumínio (Padrão)', 'Aço Inox'
@@ -42,41 +40,49 @@ if df is not None:
             materiais_map[nome] = idx
         idx += 2
 
-    # --- 4. BARRA LATERAL (CHECKBOXES) ---
-    st.sidebar.header("⚙️ Materiais para Análise")
-    st.sidebar.write("Marca ou desmarca para atualizar os gráficos:")
+    # --- 4. BARRA LATERAL (CHECKBOXES DE MATERIAIS) ---
+    st.sidebar.header("⚙️ 1. Materiais para Análise")
+    st.sidebar.write("Marca ou desmarca para atualizar:")
     
     selecionados = []
-    # Materiais que já começam selecionados por padrão
     padroes = ['Fibra de Carbono', 'Alumínio CHASSI', 'Aço 1020']
     
     for mat in materiais_map.keys():
-        # Cria a checkbox. Se o utilizador a marcar, entra na lista 'selecionados'
         if st.sidebar.checkbox(mat, value=(mat in padroes)):
             selecionados.append(mat)
 
-    # --- 5. EXIBIÇÃO DE GRÁFICOS E TABELAS ---
+    # --- 5. BARRA LATERAL (ROLL BARS / SLIDERS PARA PESOS) ---
+    st.sidebar.markdown("---")
+    st.sidebar.header("⚖️ 2. Pesos dos Critérios")
+    st.sidebar.write("Desliza para alterar a importância de cada critério:")
+    
+    pesos_dinamicos = {}
+    for i, row in df.iterrows():
+        criterio = str(row[df.columns[0]])
+        peso_padrao = float(row[df.columns[1]]) if pd.notna(row[df.columns[1]]) else 10.0
+        
+        # Cria a "roll bar" (slider) para o critério
+        novo_peso = st.sidebar.slider(criterio, min_value=0.0, max_value=100.0, value=peso_padrao, step=1.0)
+        pesos_dinamicos[criterio] = novo_peso
+
+    # --- 6. EXIBIÇÃO DE GRÁFICOS E TABELAS ---
     if not selecionados:
         st.warning("👈 Por favor, seleciona pelo menos um material na barra lateral.")
     else:
-        # Separa os Critérios (Linhas 0 a 5) do Total Final (Linha 6)
-        df_criterios = df.iloc[:6] 
-        df_totais = df.iloc[6]     
-        criterios = df_criterios.iloc[:, 0].tolist()
+        criterios = df.iloc[:, 0].astype(str).tolist()
 
-        # Divide o ecrã em duas colunas para os gráficos ficarem lado a lado
         col1, col2 = st.columns(2)
 
-        # GRÁFICO 1: RADAR DE DESEMPENHO
+        # GRÁFICO 1: RADAR DE DESEMPENHO (Usa as notas brutas de 1 a 5)
         with col1:
             st.subheader("🎯 Comparativo por Critério (Radar)")
             fig_radar = go.Figure()
             
             for mat in selecionados:
                 col_idx = materiais_map[mat]
-                notas = df_criterios.iloc[:, col_idx].fillna(0).tolist()
+                notas = pd.to_numeric(df.iloc[:, col_idx], errors='coerce').fillna(0).tolist()
                 
-                # Fechar o polígono do radar repetindo a primeira nota no fim
+                # Fechar o polígono do radar
                 notas += [notas[0]]
                 criterios_fechados = criterios + [criterios[0]]
                 
@@ -95,16 +101,29 @@ if df is not None:
             )
             st.plotly_chart(fig_radar, use_container_width=True)
 
-        # GRÁFICO 2: PONTUAÇÃO TOTAL PONDERADA
+
+        # --- CÁLCULO DAS NOTAS PONDERADAS EM TEMPO REAL ---
+        dados_barras = []
+        df_tabela = pd.DataFrame({'Critério': criterios})
+        linha_totais = {'Critério': '🏆 TOTAL PONDERADO'}
+
+        for mat in selecionados:
+            col_idx = materiais_map[mat]
+            notas_brutas = pd.to_numeric(df.iloc[:, col_idx], errors='coerce').fillna(0).tolist()
+            
+            # Matemática: Multiplica a nota da planilha pelo peso do Slider!
+            notas_ponderadas = [n * pesos_dinamicos[c] for n, c in zip(notas_brutas, criterios)]
+            pontuacao_total = sum(notas_ponderadas)
+            
+            # Guarda os resultados para o Gráfico de Barras e para a Tabela
+            dados_barras.append({'Material': mat, 'Pontuação': pontuacao_total})
+            df_tabela[f"{mat} (Nota Ponderada)"] = notas_ponderadas
+            linha_totais[f"{mat} (Nota Ponderada)"] = pontuacao_total
+
+
+        # GRÁFICO 2: PONTUAÇÃO TOTAL PONDERADA (Atualizado com os sliders)
         with col2:
             st.subheader("🏆 Pontuação Final Ponderada")
-            dados_barras = []
-            
-            for mat in selecionados:
-                col_idx = materiais_map[mat]
-                # A pontuação final está sempre na coluna à direita (+1) da nota
-                pontuacao = df_totais.iloc[col_idx + 1]
-                dados_barras.append({'Material': mat, 'Pontuação': pontuacao})
             
             df_barras = pd.DataFrame(dados_barras).sort_values(by='Pontuação', ascending=False)
             
@@ -120,27 +139,16 @@ if df is not None:
             fig_bar.update_layout(yaxis_range=[0, max(df_barras['Pontuação']) * 1.2], showlegend=False)
             st.plotly_chart(fig_bar, use_container_width=True)
 
-        # TABELA: A MATRIZ DINÂMICA
+
+        # TABELA: A MATRIZ DINÂMICA (Apenas Ponderados)
         st.markdown("---")
-        st.subheader("📋 Matriz de Decisão Dinâmica")
+        st.subheader("📋 Matriz de Decisão Dinâmica (Apenas Notas Ponderadas)")
         
-        # Constrói a tabela apenas com as colunas escolhidas
-        colunas_para_mostrar = [df.columns[0], df.columns[1]] 
-        nomes_tabela = ['Critério', 'Peso']
+        # Junta a linha do Somatório Total ao fim da tabela
+        df_tabela = pd.concat([df_tabela, pd.DataFrame([linha_totais])], ignore_index=True)
         
-        for mat in selecionados:
-            col_idx = materiais_map[mat]
-            colunas_para_mostrar.append(df.columns[col_idx])
-            colunas_para_mostrar.append(df.columns[col_idx + 1])
-            nomes_tabela.append(f"{mat} (Nota)")
-            nomes_tabela.append(f"{mat} (Ponderado)")
+        # Define o 'Critério' como índice para ficar congelado no ecrã (Scroll Freeze)
+        df_fixo = df_tabela.set_index('Critério')
         
-        df_limpo = df[colunas_para_mostrar].copy()
-        df_limpo.columns = nomes_tabela
-        
-        # 💡 O GRANDE TRUQUE: Transformar 'Critério' e 'Peso' no Índice da tabela.
-        # Isso faz o Streamlit fixá-las automaticamente ao fazer scroll para a direita!
-        df_fixo = df_limpo.set_index(['Critério', 'Peso'])
-        
-        # Mostra a tabela interativa com as colunas congeladas
-        st.dataframe(df_fixo, use_container_width=True)
+        # Mostra a tabela (o '.style.format' deixa os números bonitos com apenas 1 casa decimal)
+        st.dataframe(df_fixo.style.format("{:.1f}"), use_container_width=True)
